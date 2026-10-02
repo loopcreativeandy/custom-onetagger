@@ -623,6 +623,12 @@ class OneTagger {
 
     // Handle keydown event for keyboard bindings
     handleKeyDown(event: KeyboardEvent) {
+        // Focus the custom tag filter in the right drawer
+        if (event.code == "KeyF" && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+            window.dispatchEvent(new Event('1t-focus-tag-filter'));
+            return true;
+        }
+
         // QT Keybinds
         if (this.quickTag.value.track.hasTracks()) {
             // Arrow keys

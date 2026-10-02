@@ -7,7 +7,21 @@
             Add custom note            
         </q-btn>
     </div>
-    <div v-for='(tag, i) in $1t.settings.value.quickTag.custom' :key='"tag"+i' class='q-pb-md'>
+    <!-- Tag filter: type to filter, Up/Down to move, Enter to toggle, Esc to clear -->
+    <div class='tag-filter-sticky'>
+        <q-input
+            ref='filterRef'
+            v-model='filter'
+            dense
+            filled
+            clearable
+            label='Filter tags (Ctrl+F)'
+            @update:model-value='highlight = 0'
+            @keydown='filterKeydown'
+        ></q-input>
+    </div>
+
+    <div v-for='(tag, i) in $1t.settings.value.quickTag.custom' :key='"tag"+i' class='q-pb-md' v-show='!filtering || matchesByTag[i]'>
         <!-- Tag title -->
         <q-expansion-item 
             :label='tag.name' 
@@ -18,7 +32,12 @@
             :switch-toggle-side='false'
         >
             <!-- Values -->
-            <div v-for='(value, j) in tag.values' :key='i+"value"+j'>
+            <div
+                v-for='(value, j) in tag.values'
+                :key='i+"value"+j'
+                v-show='!filtering || isMatch(i, j)'
+                :class='{"tag-filter-highlight": filtering && isHighlighted(i, j)}'
+            >
                 <q-checkbox
                     :label='value.val'
                     :model-value='selected(i, value.val)'
@@ -54,12 +73,91 @@
 </template>
 
 <script lang='ts' setup>
-import { ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { get1t } from '../scripts/onetagger.js';
 
 const $1t = get1t();
 const newTag = ref(-1);
 const newTagValue = ref<string | undefined>(undefined);
+
+// Tag filter
+const filter = ref<string | null>(null);
+const highlight = ref(0);
+const filterRef = ref<any>();
+
+const filterTokens = computed(() => (filter.value ?? '').toLowerCase().split(/\s+/).filter(t => t.length > 0));
+const filtering = computed(() => filterTokens.value.length > 0);
+
+// Every query word must appear in the value or its category name
+const matches = computed(() => {
+    let out: { tag: number, value: number, val: string }[] = [];
+    if (!filtering.value) return out;
+    $1t.settings.value.quickTag.custom.forEach((tag, i) => {
+        tag.values.forEach((value, j) => {
+            let haystack = `${value.val} ${tag.name}`.toLowerCase();
+            if (filterTokens.value.every(t => haystack.includes(t)))
+                out.push({ tag: i, value: j, val: value.val });
+        });
+    });
+    // Matches on the value itself first, then prefix matches
+    const score = (m: { val: string }) => {
+        let v = m.val.toLowerCase();
+        if (!filterTokens.value.every(t => v.includes(t))) return 2;
+        return v.startsWith(filterTokens.value[0]) ? 0 : 1;
+    };
+    return out.map((m, k) => ({ m, k, s: score(m) })).sort((a, b) => a.s - b.s || a.k - b.k).map(x => x.m);
+});
+const matchesByTag = computed(() => {
+    let out: Record<number, boolean> = {};
+    matches.value.forEach(m => out[m.tag] = true);
+    return out;
+});
+
+function isMatch(tag: number, value: number) {
+    return matches.value.some(m => m.tag == tag && m.value == value);
+}
+function isHighlighted(tag: number, value: number) {
+    let m = matches.value[highlight.value];
+    return m && m.tag == tag && m.value == value;
+}
+
+function filterKeydown(e: KeyboardEvent) {
+    if (e.key == 'ArrowDown' || e.key == 'ArrowUp') {
+        let n = matches.value.length;
+        if (n > 0) highlight.value = (highlight.value + (e.key == 'ArrowDown' ? 1 : n - 1)) % n;
+        e.preventDefault();
+        nextTick(() => document.querySelector('.tag-filter-highlight')?.scrollIntoView({ block: 'nearest' }));
+        return;
+    }
+    if (e.key == 'Enter') {
+        e.preventDefault();
+        let m = matches.value[highlight.value];
+        // Empty filter or no match: leave the field so keybinds work again
+        if (!m) {
+            filterRef.value?.blur();
+            return;
+        }
+        if ($1t.quickTag.value.track.hasTracks())
+            valueClick(m.tag, $1t.settings.value.quickTag.custom[m.tag].values[m.value].val);
+        // Clear and stay focused, ready for the next tag
+        filter.value = null;
+        highlight.value = 0;
+        return;
+    }
+    if (e.key == 'Escape') {
+        e.preventDefault();
+        filter.value = null;
+        highlight.value = 0;
+        filterRef.value?.blur();
+    }
+}
+
+function focusFilter() {
+    filterRef.value?.focus();
+    filterRef.value?.select();
+}
+onMounted(() => window.addEventListener('1t-focus-tag-filter', focusFilter));
+onUnmounted(() => window.removeEventListener('1t-focus-tag-filter', focusFilter));
 
 // If the value is present in tag
 function selected(tag: number, value: string) {
@@ -108,6 +206,18 @@ function addNewTag() {
     position: absolute;
     bottom: -10px;
     left: 128px;
+}
+.tag-filter-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #202020;
+    margin: -16px -16px 16px -16px;
+    padding: 16px 16px 0 16px;
+}
+.tag-filter-highlight {
+    background: rgba(0, 210, 191, 0.2);
+    border-radius: 4px;
 }
 .hide-expand-icon {
     display: none !important;
