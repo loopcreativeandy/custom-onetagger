@@ -139,9 +139,11 @@ function filterKeydown(e: KeyboardEvent) {
         }
         if ($1t.quickTag.value.track.hasTracks())
             valueClick(m.tag, $1t.settings.value.quickTag.custom[m.tag].values[m.value].val);
-        // Clear and stay focused, ready for the next tag
+        // Clear and leave the field so track keys (Up/Down, Space) work straight away;
+        // Ctrl+F again for the next tag
         filter.value = null;
         highlight.value = 0;
+        filterRef.value?.blur();
         return;
     }
     if (e.key == 'Escape') {
